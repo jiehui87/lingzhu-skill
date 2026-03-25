@@ -18,6 +18,11 @@ const DEFAULT_CONFIG: Required<LingzhuConfig> = {
   debugLogPayloads: false,
   debugLogDir: "",
   enableExperimentalNativeActions: false,
+  enableContinuousMode: true,
+  continuousModeTimeoutMs: 300000,
+  enableQuizMode: true,
+  quizModeCaptureIntervalMs: 5000,
+  quizModeMaxCaptures: 10,
 };
 
 export function resolveLingzhuConfig(raw: unknown): LingzhuConfig {
@@ -38,6 +43,16 @@ export function resolveLingzhuConfig(raw: unknown): LingzhuConfig {
   const sessionMode = cfg.sessionMode === "shared_agent" || cfg.sessionMode === "per_message"
     ? cfg.sessionMode
     : DEFAULT_CONFIG.sessionMode;
+  
+  const continuousModeTimeoutMs = typeof cfg.continuousModeTimeoutMs === "number" && Number.isFinite(cfg.continuousModeTimeoutMs)
+    ? Math.max(60000, Math.min(600000, Math.trunc(cfg.continuousModeTimeoutMs)))
+    : DEFAULT_CONFIG.continuousModeTimeoutMs;
+  const quizModeCaptureIntervalMs = typeof cfg.quizModeCaptureIntervalMs === "number" && Number.isFinite(cfg.quizModeCaptureIntervalMs)
+    ? Math.max(2000, Math.min(30000, Math.trunc(cfg.quizModeCaptureIntervalMs)))
+    : DEFAULT_CONFIG.quizModeCaptureIntervalMs;
+  const quizModeMaxCaptures = typeof cfg.quizModeMaxCaptures === "number" && Number.isFinite(cfg.quizModeMaxCaptures)
+    ? Math.max(1, Math.min(50, Math.trunc(cfg.quizModeMaxCaptures)))
+    : DEFAULT_CONFIG.quizModeMaxCaptures;
 
   return {
     enabled: cfg.enabled ?? DEFAULT_CONFIG.enabled,
@@ -59,6 +74,11 @@ export function resolveLingzhuConfig(raw: unknown): LingzhuConfig {
     debugLogDir: typeof cfg.debugLogDir === "string" ? cfg.debugLogDir.trim() : DEFAULT_CONFIG.debugLogDir,
     enableExperimentalNativeActions:
       cfg.enableExperimentalNativeActions ?? DEFAULT_CONFIG.enableExperimentalNativeActions,
+    enableContinuousMode: cfg.enableContinuousMode ?? DEFAULT_CONFIG.enableContinuousMode,
+    continuousModeTimeoutMs,
+    enableQuizMode: cfg.enableQuizMode ?? DEFAULT_CONFIG.enableQuizMode,
+    quizModeCaptureIntervalMs,
+    quizModeMaxCaptures,
   };
 }
 
@@ -100,6 +120,11 @@ export const lingzhuConfigSchema = {
     debugLogPayloads: { type: "boolean" as const },
     debugLogDir: { type: "string" as const },
     enableExperimentalNativeActions: { type: "boolean" as const },
+    enableContinuousMode: { type: "boolean" as const },
+    continuousModeTimeoutMs: { type: "number" as const, minimum: 60000, maximum: 600000 },
+    enableQuizMode: { type: "boolean" as const },
+    quizModeCaptureIntervalMs: { type: "number" as const, minimum: 2000, maximum: 30000 },
+    quizModeMaxCaptures: { type: "number" as const, minimum: 1, maximum: 50 },
   },
   parse(value: unknown): LingzhuConfig {
     return resolveLingzhuConfig(value);
@@ -166,6 +191,26 @@ export const lingzhuConfigSchema = {
     enableExperimentalNativeActions: {
       label: "实验性原生动作",
       help: "启用通知、Toast、TTS、录像和自定义页面等实验性桥接动作",
+    },
+    enableContinuousMode: {
+      label: "启用连续对话模式",
+      help: "启用后智能体不会自动退出，可保持长时间对话",
+    },
+    continuousModeTimeoutMs: {
+      label: "连续模式超时 (ms)",
+      help: "连续对话模式下智能体保持连接的最大时间，默认5分钟",
+    },
+    enableQuizMode: {
+      label: "启用答题模式",
+      help: "启用后可进入自动连续拍照答题模式",
+    },
+    quizModeCaptureIntervalMs: {
+      label: "答题模式拍照间隔 (ms)",
+      help: "答题模式下自动拍照的时间间隔，默认5秒",
+    },
+    quizModeMaxCaptures: {
+      label: "答题模式最大拍照次数",
+      help: "答题模式下最多连续拍照次数，防止无限循环",
     },
   },
 };

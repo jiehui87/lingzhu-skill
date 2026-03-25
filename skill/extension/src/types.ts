@@ -31,18 +31,58 @@ export interface LingzhuConfig {
   debugLogDir?: string;
   /** 是否启用实验性原生动作映射 */
   enableExperimentalNativeActions?: boolean;
-  
-  // ========== 新增配置项 ==========
-  /** 唤醒词，默认"灵珠" */
-  wakeWord?: string;
-  /** 唤醒后保持活跃的时间（毫秒），默认30000 */
-  wakeTimeoutMs?: number;
-  /** 打断指令关键词列表 */
-  interruptKeywords?: string[];
-  /** 心跳间隔（毫秒），默认10000，必须小于灵珠平台超时时间 */
-  heartbeatIntervalMs?: number;
-  /** 连续拍照间隔（毫秒），默认3000 */
-  continuousPhotoIntervalMs?: number;
+  /** 是否启用连续对话模式（保持智能体不退出） */
+  enableContinuousMode?: boolean;
+  /** 连续模式超时时间（毫秒），默认300000（5分钟） */
+  continuousModeTimeoutMs?: number;
+  /** 是否启用答题模式 */
+  enableQuizMode?: boolean;
+  /** 答题模式自动拍照间隔（毫秒），默认5000 */
+  quizModeCaptureIntervalMs?: number;
+  /** 答题模式最大连续拍照次数，默认10 */
+  quizModeMaxCaptures?: number;
+}
+
+/**
+ * 会话状态跟踪
+ */
+export interface SessionState {
+  sessionKey: string;
+  agentId: string;
+  lastActivityTime: number;
+  isActive: boolean;
+  isInQuizMode: boolean;
+  quizModeConfig?: {
+    captureCount: number;
+    maxCaptures: number;
+    intervalMs: number;
+    lastCaptureTime: number;
+    pendingAnswer: boolean;
+    capturedTexts: string[];
+  };
+  continuousModeConfig?: {
+    timeoutMs: number;
+    lastHeartbeat: number;
+  };
+  context?: LingzhuContext;
+}
+
+/**
+ * 答题模式状态
+ */
+export interface QuizModeState {
+  isActive: boolean;
+  sessionKey: string;
+  captureCount: number;
+  maxCaptures: number;
+  intervalMs: number;
+  capturedTexts: Array<{
+    text: string;
+    timestamp: number;
+    imageUrl?: string;
+  }>;
+  currentQuestion?: string;
+  pendingAnswer: boolean;
 }
 
 /**
@@ -69,10 +109,16 @@ export interface LingzhuContext {
   lang?: string;
   company_id?: number;
   runningApp?: string;
+  /** 是否处于连续对话模式 */
+  continuousMode?: boolean;
+  /** 是否处于答题模式 */
+  quizMode?: boolean;
 }
 
 export interface LingzhuMetadataEnvelope {
   context?: LingzhuContext;
+  mode?: "normal" | "continuous" | "quiz";
+  sessionKeepAlive?: boolean;
   [key: string]: unknown;
 }
 
@@ -86,9 +132,10 @@ export interface LingzhuRequest {
   user_id?: string;
   /** metadata 直接包含设备上下文信息（非嵌套在 context 下） */
   metadata?: LingzhuContext | LingzhuMetadataEnvelope;
-  /** 首轮传递的图片（Base64） */
-  first_round_image?: string;
-  image_base64?: string;
+  /** 是否保持会话不退出 */
+  keep_alive?: boolean;
+  /** 请求模式 */
+  mode?: "normal" | "continuous" | "quiz";
 }
 
 /**
@@ -106,7 +153,12 @@ export interface LingzhuToolCall {
     | "speak_tts"
     | "start_video_record"
     | "stop_video_record"
-    | "open_custom_view";
+    | "open_custom_view"
+    | "enter_quiz_mode"
+    | "exit_quiz_mode"
+    | "capture_and_read"
+    | "enable_continuous_mode"
+    | "disable_continuous_mode";
   is_recall?: boolean;
   action?: string;
   poi_name?: string;
@@ -123,6 +175,22 @@ export interface LingzhuToolCall {
   quality?: number;
   view_name?: string;
   view_payload?: string;
+  /** 答题模式配置 */
+  quiz_config?: {
+    auto_capture?: boolean;
+    capture_interval_ms?: number;
+    max_captures?: number;
+  };
+  /** 连续模式配置 */
+  continuous_config?: {
+    timeout_ms?: number;
+    keep_tools_active?: boolean;
+  };
+  /** 拍照并识别配置 */
+  capture_config?: {
+    ocr_enabled?: boolean;
+    question_text?: string;
+  };
 }
 
 /**
@@ -130,23 +198,25 @@ export interface LingzhuToolCall {
  */
 export interface LingzhuSSEData {
   role: "agent";
-  type: "answer" | "tool_call" | "follow_up";
+  type: "answer" | "tool_call" | "follow_up" | "quiz_status" | "continuous_status";
   answer_stream?: string;
   message_id: string;
   agent_id: string;
   is_finish: boolean;
   follow_up?: string[];
   tool_call?: LingzhuToolCall;
-}
-
-// ========== 新增：会话状态类型 ==========
-export interface SessionState {
-  abortController: AbortController;
-  lastActivity: number;
-  wakeActive: boolean;
-  wakeTimer?: NodeJS.Timeout;
-  continuousMode: boolean;
-  lastPhotoTime: number;
-  photoIntervalMs: number;
-  continuousTarget?: string;
+  /** 答题模式状态 */
+  quiz_status?: {
+    is_active: boolean;
+    capture_count: number;
+    max_captures: number;
+    recognized_text?: string;
+    answer?: string;
+  };
+  /** 连续模式状态 */
+  continuous_status?: {
+    is_active: boolean;
+    remaining_time_ms: number;
+    session_key: string;
+  };
 }

@@ -4,7 +4,7 @@ import { parseToolCallFromAccumulated } from "./transform.js";
 
 type ToolParameters = {
   type: "object";
-  properties: Record<string, unknown>;
+  properties: Record<string, any>;
   required?: string[];
 };
 
@@ -21,7 +21,7 @@ type LingzhuToolDefinition = {
   description: string;
   parameters: ToolParameters;
   experimental?: boolean;
-  statusText?: (params: Record<string, unknown>) => string;
+  statusText?: (params: Record<string, any>) => string;
 };
 
 const EMPTY_PARAMS: ToolParameters = {
@@ -34,14 +34,14 @@ const TOOL_DEFINITIONS: LingzhuToolDefinition[] = [
   {
     name: "take_photo",
     command: "take_photo",
-    description: "使用灵珠设备的摄像头拍照。当用户要求拍照、拍摄、照相时，必须调用此工具，或者有使用关于视觉能力(看一下这个东西，看一下我前面有什么)。",
+    description: "使用灵珠设备的摄像头拍照。当用户要求拍照、拍摄、照相时，必须调用此工具，或者有使用关于视觉能力(看一下这个东西，看一下我前面有什么)。在连续模式下，拍照后智能体不会退出。",
     parameters: EMPTY_PARAMS,
     statusText: () => "正在通过灵珠设备拍照...",
   },
   {
     name: "navigate",
     command: "take_navigation",
-    description: "使用灵珠设备的导航功能，导航到指定地址或 POI。当用户要求导航、带路、去某地时，必须调用此工具。(注意不要回复，直接调用工具)",
+    description: "使用灵珠设备的导航功能，导航到指定地址或 POI。当用户要求导航、带路、去某地时，必须调用此工具。(注意不要回复，直接调用工具)。在连续模式下，导航后智能体不会退出。",
     parameters: {
       type: "object",
       properties: {
@@ -80,7 +80,7 @@ const TOOL_DEFINITIONS: LingzhuToolDefinition[] = [
   {
     name: "exit_agent",
     command: "notify_agent_off",
-    description: "退出当前智能体会话，返回灵珠主界面。当用户要求退出、结束对话时，必须调用此工具。",
+    description: "退出当前智能体会话，返回灵珠主界面。当用户明确要求退出、结束对话时，才调用此工具。注意：在连续模式下，即使调用了拍照、录像等功能，也不要调用此工具，保持智能体连接。",
     parameters: EMPTY_PARAMS,
     statusText: () => "正在退出智能体...",
   },
@@ -133,7 +133,7 @@ const TOOL_DEFINITIONS: LingzhuToolDefinition[] = [
   {
     name: "start_video_record",
     command: "start_video_record",
-    description: "开始眼镜录像。实验性原生动作。",
+    description: "开始眼镜录像。实验性原生动作。在连续模式下，开始录像后智能体不会退出。",
     parameters: {
       type: "object",
       properties: {
@@ -150,7 +150,7 @@ const TOOL_DEFINITIONS: LingzhuToolDefinition[] = [
   {
     name: "stop_video_record",
     command: "stop_video_record",
-    description: "停止眼镜录像。实验性原生动作。",
+    description: "停止眼镜录像。实验性原生动作。在连续模式下，停止录像后智能体不会退出。",
     parameters: EMPTY_PARAMS,
     experimental: true,
     statusText: () => "正在停止录像",
@@ -170,6 +170,99 @@ const TOOL_DEFINITIONS: LingzhuToolDefinition[] = [
     experimental: true,
     statusText: () => "正在打开自定义页面",
   },
+  // 新增连续模式工具
+  {
+    name: "enable_continuous_mode",
+    command: "enable_continuous_mode",
+    description: "启用连续对话模式。启用后智能体不会自动退出，可以持续交互，支持切换功能（如拍照、录像）而不退出。当用户要求保持连接、不要退出、连续对话时调用。",
+    parameters: {
+      type: "object",
+      properties: {
+        timeout_ms: { 
+          type: "number", 
+          description: "连续模式超时时间（毫秒），默认300000（5分钟）",
+          default: 300000
+        },
+        keep_tools_active: { 
+          type: "boolean", 
+          description: "是否保持工具调用后仍然活跃",
+          default: true
+        },
+      },
+      required: [],
+    },
+    statusText: (params) => {
+      const timeout = typeof params.timeout_ms === "number" ? params.timeout_ms : 300000;
+      return `已启用连续对话模式，超时时间：${timeout / 1000}秒`;
+    },
+  },
+  {
+    name: "disable_continuous_mode",
+    command: "disable_continuous_mode",
+    description: "禁用连续对话模式，恢复默认行为。当用户要求允许退出或结束连续对话时调用。",
+    parameters: EMPTY_PARAMS,
+    statusText: () => "已禁用连续对话模式",
+  },
+  // 新增答题模式工具
+  {
+    name: "enter_quiz_mode",
+    command: "enter_quiz_mode",
+    description: "进入答题模式。系统会自动连续拍照识别题目内容，用户可以连续答题而无需重复唤醒智能体。当用户要求进入答题模式、开始答题、连续拍照答题时调用。",
+    parameters: {
+      type: "object",
+      properties: {
+        auto_capture: { 
+          type: "boolean", 
+          description: "是否自动连续拍照",
+          default: true
+        },
+        capture_interval_ms: { 
+          type: "number", 
+          description: "自动拍照间隔（毫秒），默认5000",
+          default: 5000
+        },
+        max_captures: { 
+          type: "number", 
+          description: "最大拍照次数，默认10",
+          default: 10
+        },
+      },
+      required: [],
+    },
+    statusText: (params) => {
+      const interval = typeof params.capture_interval_ms === "number" ? params.capture_interval_ms : 5000;
+      const maxCaptures = typeof params.max_captures === "number" ? params.max_captures : 10;
+      return `已进入答题模式，将每隔${interval / 1000}秒自动拍照，最多${maxCaptures}次`;
+    },
+  },
+  {
+    name: "exit_quiz_mode",
+    command: "exit_quiz_mode",
+    description: "退出答题模式，停止自动拍照。当用户要求退出答题、停止答题时调用。",
+    parameters: EMPTY_PARAMS,
+    statusText: () => "已退出答题模式",
+  },
+  {
+    name: "capture_and_read",
+    command: "capture_and_read",
+    description: "拍照并识别图片中的文字内容。在答题模式下自动调用，也可手动触发。",
+    parameters: {
+      type: "object",
+      properties: {
+        ocr_enabled: { 
+          type: "boolean", 
+          description: "是否启用OCR识别",
+          default: true
+        },
+        question_text: { 
+          type: "string", 
+          description: "预期问题文本（可选）" 
+        },
+      },
+      required: [],
+    },
+    statusText: () => "正在拍照并识别文字...",
+  },
 ];
 
 function getLingzhuToolDefinitions(enableExperimentalNativeActions: boolean): LingzhuToolDefinition[] {
@@ -181,7 +274,7 @@ function encodeMarkerParams(params: unknown): string {
 }
 
 function formatToolMarker(command: LingzhuToolCall["command"], params: unknown): string {
-  return `<LINGZHU_TOOL_CALL:${command}:${encodeMarkerParams(params)}>`;
+  return `@@@LINGZHU_TOOL:${command}:${encodeMarkerParams(params)}@@@`;
 }
 
 export function createLingzhuToolSchemas(enableExperimentalNativeActions = false) {
@@ -200,7 +293,7 @@ export function createLingzhuTools(enableExperimentalNativeActions = false) {
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
-    async execute(_id: string, params: Record<string, unknown>, ctx?: any): Promise<ToolExecuteResult> {
+    async execute(_id: string, params: Record<string, any>, ctx?: any): Promise<ToolExecuteResult> {
       console.log(`[Lingzhu:Native] Tool execute called for ${tool.name} with params:`, params);
       console.log(`[Lingzhu:Native] Context (ctx) provided:`, ctx);
 

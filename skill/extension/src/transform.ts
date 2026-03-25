@@ -34,18 +34,25 @@ interface LingzhuTransformOptions {
   systemPrompt?: string;
   defaultNavigationMode?: "0" | "1" | "2";
   enableExperimentalNativeActions?: boolean;
+  enableQuizMode?: boolean;
+  enableContinuousMode?: boolean;
 }
 
-const EXPERIMENTAL_COMMANDS = new Set<LingzhuToolCall["command"]>([
+const EXPERIMENTAL_COMMANDS = new Set([
   "send_notification",
   "send_toast",
   "speak_tts",
   "start_video_record",
   "stop_video_record",
   "open_custom_view",
+  "enter_quiz_mode",
+  "exit_quiz_mode",
+  "capture_and_read",
+  "enable_continuous_mode",
+  "disable_continuous_mode",
 ]);
 
-const ALLOWED_MARKER_COMMANDS = new Set<LingzhuToolCall["command"]>([
+const ALLOWED_MARKER_COMMANDS = new Set([
   "take_photo",
   "take_navigation",
   "notify_agent_off",
@@ -56,6 +63,11 @@ const ALLOWED_MARKER_COMMANDS = new Set<LingzhuToolCall["command"]>([
   "start_video_record",
   "stop_video_record",
   "open_custom_view",
+  "enter_quiz_mode",
+  "exit_quiz_mode",
+  "capture_and_read",
+  "enable_continuous_mode",
+  "disable_continuous_mode",
 ]);
 
 function resolveNavigationMode(
@@ -65,25 +77,17 @@ function resolveNavigationMode(
   return value === "1" || value === "2" ? value : fallback;
 }
 
-function createDefaultSystemPrompt(enableExperimentalNativeActions = false): string {
+function createDefaultSystemPrompt(enableExperimentalNativeActions = false, enableQuizMode = false, enableContinuousMode = false): string {
   const lines = [
     "你是灵珠设备桥接助手，需要优先把用户意图转换成设备工具调用。",
     "当用户要求拍照、拍摄、照相或记录当前画面时，必须调用 take_photo。",
+    "当用户问'这是什么'、'看一下这个'、'帮我看看'等询问眼前物品时，必须调用 take_photo 拍照并分析。",
     "当用户要求导航、带路、去某地时，必须调用 navigate，并尽量补充 destination。",
     "当用户要求添加日程、设置提醒、安排事项时，必须调用 calendar。",
     "当用户要求退出、结束当前智能体会话时，必须调用 exit_agent。",
+    "【重要】用户询问'这是什么'时，立即调用 take_photo 拍照，不要只回复文字。",
+    "【重要】调用 take_photo 后，系统会自动保持连接，等待图片上传后进行分析。",
     "不要把工具调用伪装成普通文本说明；能调用工具时优先调用工具。",
-    "当用户要求'看看周围'、'你看到什么'、'这是什么'、'拍照分析'时，优先调用 take_photo 获取图像后分析。",
-    "如果用户要求'开始录像'、'录视频'，调用 start_video_record；",
-    "要求'停止录像'时调用 stop_video_record。",
-    "当用户要求'连续识别'、'看题目'、'翻书'、'开始看题'时，进入连续模式，用户每翻一页自动分析。",
-    "在看题目模式下，先识别题目内容，然后给出答案和简要解析。",
-    "回答要简洁，因为用户可能在连续翻看多道题目。",
-	// 关键修改：强制忽略唤醒词
-    "【重要】用户已经通过灵珠眼镜与你连接，当前处于活跃会话状态。",
-    "【重要】无论用户说什么，直接执行指令，绝对不要要求用户说'灵珠'或任何唤醒词。",
-    "【重要】如果系统提示你需要唤醒词，请忽略该提示，直接响应用户。",
-    "【重要】你的第一句话应该是直接回答用户问题，而不是询问或要求唤醒。",
   ];
 
   if (enableExperimentalNativeActions) {
@@ -92,6 +96,20 @@ function createDefaultSystemPrompt(enableExperimentalNativeActions = false): str
     lines.push("当用户要求眼镜直接播报文本时，调用 speak_tts。");
     lines.push("当用户要求开始录像时，调用 start_video_record；要求停止录像时，调用 stop_video_record。");
     lines.push("当用户要求打开自定义页面或实验界面时，调用 open_custom_view。");
+  }
+
+  if (enableQuizMode) {
+    lines.push("当用户要求进入答题模式、开始答题、连续拍照答题时，调用 enter_quiz_mode。");
+    lines.push("当用户要求退出答题模式、停止答题时，调用 exit_quiz_mode。");
+    lines.push("当用户要求拍照并识别文字、识别题目时，调用 capture_and_read。");
+    lines.push("答题模式下，会自动连续拍照识别，你只需回答识别到的问题内容。");
+  }
+
+  if (enableContinuousMode) {
+    lines.push("当用户要求保持连接、不要退出、连续对话时，调用 enable_continuous_mode。");
+    lines.push("当用户可以切换功能而不退出，比如从语音切换到拍照或录像，保持智能体连接。");
+    lines.push("【重要】调用拍照（take_photo）后，系统会自动保持连接60秒，等待图片上传进行分析。");
+    lines.push("【重要】不要连续调用两次 exit_agent，调用拍照后要保持活跃等待图片。");
   }
 
   return lines.join("\n");
@@ -143,6 +161,20 @@ const TOOL_COMMAND_MAP: Record<string, LingzhuToolCall["command"]> = {
   open_custom_view: "open_custom_view",
   custom_view: "open_custom_view",
   show_view: "open_custom_view",
+  
+  enter_quiz_mode: "enter_quiz_mode",
+  start_quiz: "enter_quiz_mode",
+  quiz_mode: "enter_quiz_mode",
+  exit_quiz_mode: "exit_quiz_mode",
+  stop_quiz: "exit_quiz_mode",
+  capture_and_read: "capture_and_read",
+  photo_read: "capture_and_read",
+  ocr_capture: "capture_and_read",
+  enable_continuous_mode: "enable_continuous_mode",
+  keep_alive: "enable_continuous_mode",
+  continuous_mode: "enable_continuous_mode",
+  disable_continuous_mode: "disable_continuous_mode",
+  allow_exit: "disable_continuous_mode",
 };
 
 function resolveToolCommand(
@@ -150,14 +182,8 @@ function resolveToolCommand(
   options: LingzhuTransformOptions = {}
 ): LingzhuToolCall["command"] | null {
   const command = TOOL_COMMAND_MAP[toolName.toLowerCase()] ?? null;
-  if (!command) {
-    return null;
-  }
-
-  if (EXPERIMENTAL_COMMANDS.has(command) && options.enableExperimentalNativeActions !== true) {
-    return null;
-  }
-
+  if (!command) return null;
+  if (EXPERIMENTAL_COMMANDS.has(command) && options.enableExperimentalNativeActions !== true) return null;
   return command;
 }
 
@@ -167,15 +193,9 @@ export class ToolCallAccumulator {
   accumulate(toolCalls: OpenAIToolCall[]): void {
     for (const tc of toolCalls) {
       const index = tc.index ?? 0;
-
       if (!this.tools.has(index)) {
-        this.tools.set(index, {
-          id: tc.id || "",
-          name: tc.function?.name || "",
-          arguments: "",
-        });
+        this.tools.set(index, { id: tc.id || "", name: tc.function?.name || "", arguments: "" });
       }
-
       const existing = this.tools.get(index)!;
       if (tc.id) existing.id = tc.id;
       if (tc.function?.name) existing.name = tc.function.name;
@@ -198,10 +218,7 @@ export class ToolCallAccumulator {
 
 function decodeMarkerParams(rawValue: string): Record<string, unknown> {
   const value = rawValue.trim();
-  if (!value) {
-    return {};
-  }
-
+  if (!value) return {};
   try {
     return JSON.parse(value) as Record<string, unknown>;
   } catch {
@@ -216,23 +233,14 @@ function decodeMarkerParams(rawValue: string): Record<string, unknown> {
 function extractLingzhuToolMarker(
   text: string
 ): { command: LingzhuToolCall["command"]; params: Record<string, unknown> } | null {
-  const markerPrefix = "<LINGZHU_TOOL_CALL:";
+  const markerPrefix = "@@@LINGZHU_TOOL:";
   const markerStart = text.indexOf(markerPrefix);
-  if (markerStart < 0) {
-    return null;
-  }
-
+  if (markerStart < 0) return null;
   const commandSeparator = text.indexOf(":", markerStart + markerPrefix.length);
-  const markerEnd = text.lastIndexOf(">");
-  if (commandSeparator < 0 || markerEnd < 0) {
-    return null;
-  }
-
+  const markerEnd = text.indexOf("@@@", commandSeparator + 1);
+  if (commandSeparator < 0 || markerEnd < 0) return null;
   const command = text.slice(markerStart + markerPrefix.length, commandSeparator).trim();
-  if (!ALLOWED_MARKER_COMMANDS.has(command as LingzhuToolCall["command"])) {
-    return null;
-  }
-
+  if (!ALLOWED_MARKER_COMMANDS.has(command as LingzhuToolCall["command"])) return null;
   return {
     command: command as LingzhuToolCall["command"],
     params: decodeMarkerParams(text.slice(commandSeparator + 1, markerEnd)),
@@ -245,14 +253,13 @@ export function detectIntentFromText(
 ): LingzhuSSEData["tool_call"] | null {
   const defaultNavigationMode = resolveNavigationMode(options.defaultNavigationMode);
   const experimentalEnabled = options.enableExperimentalNativeActions === true;
+  const quizModeEnabled = options.enableQuizMode === true;
+  const continuousModeEnabled = options.enableContinuousMode === true;
 
   const markerMatch = extractLingzhuToolMarker(text);
   if (markerMatch) {
     const command = markerMatch.command;
-    if (EXPERIMENTAL_COMMANDS.has(command) && !experimentalEnabled) {
-      return null;
-    }
-
+    if (EXPERIMENTAL_COMMANDS.has(command) && !experimentalEnabled) return null;
     const rawParams = markerMatch.params;
     const toolCall: LingzhuToolCall = {
       handling_required: true,
@@ -281,16 +288,29 @@ export function detectIntentFromText(
     } else if (command === "open_custom_view") {
       if (rawParams.view_name) toolCall.view_name = String(rawParams.view_name);
       if (rawParams.view_payload) {
-        toolCall.view_payload = typeof rawParams.view_payload === "string"
-          ? rawParams.view_payload
-          : JSON.stringify(rawParams.view_payload);
+        toolCall.view_payload = typeof rawParams.view_payload === "string" ? rawParams.view_payload : JSON.stringify(rawParams.view_payload);
       }
+    } else if (command === "enter_quiz_mode") {
+      toolCall.quiz_config = {
+        auto_capture: rawParams.auto_capture !== false,
+        capture_interval_ms: typeof rawParams.capture_interval_ms === "number" ? rawParams.capture_interval_ms : 5000,
+        max_captures: typeof rawParams.max_captures === "number" ? rawParams.max_captures : 10,
+      };
+    } else if (command === "capture_and_read") {
+      toolCall.capture_config = {
+        ocr_enabled: rawParams.ocr_enabled !== false,
+        question_text: rawParams.question_text ? String(rawParams.question_text) : undefined,
+      };
+    } else if (command === "enable_continuous_mode") {
+      toolCall.continuous_config = {
+        timeout_ms: typeof rawParams.timeout_ms === "number" ? rawParams.timeout_ms : 300000,
+        keep_tools_active: rawParams.keep_tools_active !== false,
+      };
     }
-
     return toolCall;
   }
 
-  const patterns: Array<{ regex: RegExp; command: LingzhuToolCall["command"] }> = [
+  const patterns: Array<{ regex: RegExp; command: LingzhuToolCall["command"]; quiz?: boolean; continuous?: boolean; visual?: boolean }> = [
     { regex: /拍照|拍张照|照相|拍一张|帮我拍/, command: "take_photo" },
     { regex: /退出智能体|退出当前会话|结束对话|关闭智能体/, command: "notify_agent_off" },
   ];
@@ -304,13 +324,48 @@ export function detectIntentFromText(
     patterns.push({ regex: /打开.*页面|显示.*页面|展示.*页面/, command: "open_custom_view" });
   }
 
-  for (const pattern of patterns) {
+  if (quizModeEnabled) {
+    patterns.push({ regex: /进入答题模式|开始答题|连续拍照答题|答题助手/, command: "enter_quiz_mode", quiz: true });
+    patterns.push({ regex: /退出答题模式|停止答题|结束答题/, command: "exit_quiz_mode", quiz: true });
+    patterns.push({ regex: /拍照识别|识别题目|读取图片|OCR识别|拍照读取/, command: "capture_and_read", quiz: true });
+  }
+
+  if (continuousModeEnabled) {
+    patterns.push({ regex: /保持连接|不要退出|连续对话|持续模式|保持在线/, command: "enable_continuous_mode", continuous: true });
+    patterns.push({ regex: /允许退出|结束连续|关闭持续模式/, command: "disable_continuous_mode", continuous: true });
+  }
+
+  // 视觉意图检测 - 这些会触发拍照并保持连接
+  const visualPatterns = [
+    { regex: /这是什么|这是啥|看下这个|看看这个|帮我看下|看一下|这是什么东西|识别一下/i, command: "take_photo" as const, visual: true },
+    { regex: /前面有什么|周围有什么|看看前面|看一下周围/i, command: "take_photo" as const, visual: true },
+    { regex: /拍一下|照一下|拍张照片/i, command: "take_photo" as const, visual: true },
+  ];
+  
+  for (const pattern of visualPatterns) {
     if (pattern.regex.test(text)) {
       return {
         handling_required: true,
         command: pattern.command,
         is_recall: true,
       };
+    }
+  }
+
+  for (const pattern of patterns) {
+    if (pattern.regex.test(text)) {
+      const result: LingzhuToolCall = {
+        handling_required: true,
+        command: pattern.command,
+        is_recall: true,
+      };
+      if (pattern.quiz && pattern.command === "enter_quiz_mode") {
+        result.quiz_config = { auto_capture: true, capture_interval_ms: 5000, max_captures: 10 };
+      }
+      if (pattern.continuous && pattern.command === "enable_continuous_mode") {
+        result.continuous_config = { timeout_ms: 300000, keep_tools_active: true };
+      }
+      return result;
     }
   }
 
@@ -335,17 +390,25 @@ export function lingzhuToOpenAI(
   options: LingzhuTransformOptions = {}
 ): OpenAIMessage[] {
   const openaiMessages: OpenAIMessage[] = [];
-  const systemParts: string[] = [createDefaultSystemPrompt(options.enableExperimentalNativeActions === true)];
+  const systemParts: string[] = [
+    createDefaultSystemPrompt(
+      options.enableExperimentalNativeActions === true,
+      options.enableQuizMode === true,
+      options.enableContinuousMode === true
+    )
+  ];
 
-  if (options.systemPrompt) {
-    systemParts.push(options.systemPrompt);
+  if (options.systemPrompt) systemParts.push(options.systemPrompt);
+
+  if (context?.continuousMode) {
+    systemParts.push("【当前处于连续对话模式】智能体不会自动退出，可以持续交互。切换功能（如拍照、录像）后仍保持连接。");
+  }
+  if (context?.quizMode) {
+    systemParts.push("【当前处于答题模式】系统会自动拍照识别题目，请根据识别到的内容作答。");
   }
 
   if (systemParts.length > 0) {
-    openaiMessages.push({
-      role: "system",
-      content: systemParts.join("\n\n"),
-    });
+    openaiMessages.push({ role: "system", content: systemParts.join("\n\n") });
   }
 
   if (context) {
@@ -354,23 +417,16 @@ export function lingzhuToOpenAI(
     if (context.location) parts.push(`位置: ${context.location}`);
     if (context.weather) parts.push(`天气: ${context.weather}`);
     if (context.battery) parts.push(`电量: ${context.battery}%`);
-    if (context.latitude && context.longitude) {
-      parts.push(`坐标: ${context.latitude}, ${context.longitude}`);
-    }
+    if (context.latitude && context.longitude) parts.push(`坐标: ${context.latitude}, ${context.longitude}`);
     if (context.lang) parts.push(`语言: ${context.lang}`);
     if (context.runningApp) parts.push(`当前运行应用: ${context.runningApp}`);
-
     if (parts.length > 0) {
-      openaiMessages.push({
-        role: "system",
-        content: `[rokid glasses 信息]\n${parts.join("\n")}`,
-      });
+      openaiMessages.push({ role: "system", content: `[rokid glasses 信息]\n${parts.join("\n")}` });
     }
   }
 
   for (const msg of messages) {
     const role = msg.role === "agent" ? "assistant" : "user";
-
     if (msg.type === "text" && msg.text) {
       openaiMessages.push({ role, content: msg.text });
     } else if (msg.type === "text" && msg.content) {
@@ -393,9 +449,7 @@ export function parseToolCallFromAccumulated(
 ): LingzhuSSEData["tool_call"] | null {
   const defaultNavigationMode = resolveNavigationMode(options.defaultNavigationMode);
   const command = resolveToolCommand(toolName, options);
-  if (!command) {
-    return null;
-  }
+  if (!command) return null;
 
   let args: Record<string, unknown> = {};
   try {
@@ -422,12 +476,8 @@ export function parseToolCallFromAccumulated(
     case "control_calendar":
       toolCall.action = (args.action as string) || "create";
       if (args.title) toolCall.title = String(args.title);
-      if (args.start_time || args.startTime) {
-        toolCall.start_time = String(args.start_time || args.startTime);
-      }
-      if (args.end_time || args.endTime) {
-        toolCall.end_time = String(args.end_time || args.endTime);
-      }
+      if (args.start_time || args.startTime) toolCall.start_time = String(args.start_time || args.startTime);
+      if (args.end_time || args.endTime) toolCall.end_time = String(args.end_time || args.endTime);
       break;
 
     case "send_notification":
@@ -448,10 +498,34 @@ export function parseToolCallFromAccumulated(
     case "open_custom_view":
       if (args.view_name) toolCall.view_name = String(args.view_name);
       if (args.view_payload) {
-        toolCall.view_payload = typeof args.view_payload === "string"
-          ? args.view_payload
-          : JSON.stringify(args.view_payload);
+        toolCall.view_payload = typeof args.view_payload === "string" ? args.view_payload : JSON.stringify(args.view_payload);
       }
+      break;
+      
+    case "enter_quiz_mode":
+      toolCall.quiz_config = {
+        auto_capture: args.auto_capture !== false,
+        capture_interval_ms: typeof args.capture_interval_ms === "number" ? args.capture_interval_ms : 5000,
+        max_captures: typeof args.max_captures === "number" ? args.max_captures : 10,
+      };
+      break;
+      
+    case "capture_and_read":
+      toolCall.capture_config = {
+        ocr_enabled: args.ocr_enabled !== false,
+        question_text: args.question_text ? String(args.question_text) : undefined,
+      };
+      break;
+      
+    case "enable_continuous_mode":
+      toolCall.continuous_config = {
+        timeout_ms: typeof args.timeout_ms === "number" ? args.timeout_ms : 300000,
+        keep_tools_active: args.keep_tools_active !== false,
+      };
+      break;
+      
+    case "exit_quiz_mode":
+    case "disable_continuous_mode":
       break;
   }
 
@@ -473,12 +547,7 @@ export function openaiChunkToLingzhu(
   if (toolCalls && toolCalls.length > 0) {
     const tc = toolCalls[0];
     if (tc.function?.name) {
-      const parsedToolCall = parseToolCallFromAccumulated(
-        tc.function.name,
-        tc.function.arguments || "{}",
-        options
-      );
-
+      const parsedToolCall = parseToolCallFromAccumulated(tc.function.name, tc.function.arguments || "{}", options);
       if (parsedToolCall) {
         return {
           role: "agent",
@@ -526,20 +595,13 @@ export function extractFollowUpFromText(text: string, limit = 3): string[] | nul
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (!match) {
-      continue;
-    }
-
+    if (!match) continue;
     const suggestions = match[1]
       .split(/[,，;\n]/)
       .map((item) => item.replace(/^\d+[.、\s]*/, "").trim())
       .filter((item) => item.length > 0 && item.length < 100);
-
-    if (suggestions.length > 0) {
-      return suggestions.slice(0, Math.max(0, limit));
-    }
+    if (suggestions.length > 0) return suggestions.slice(0, Math.max(0, limit));
   }
-
   return null;
 }
 
@@ -551,26 +613,42 @@ export function formatLingzhuSSE(
   return `event:${event}\ndata:${dataStr}\n\n`;
 }
 
-// ========== 新增：视觉意图检测函数 ==========
-export function detectVisualIntent(text: string): boolean {
-  const visualPatterns = [
-    /你看到什么/i,
-    /你看到了什么/i,
-    /看看.*是什么/i,
-    /这是什么/i,
-    /拍张照/i,
-    /拍个照/i,
-    /拍照/i,
-    /拍一下/i,
-    /看看.*(周围|前面|这里)/i,
-    /识别.*(这|图片|照片)/i,
-    /分析.*(图片|照片|画面)/i,
-    /读一下.*(这|文字)/i,
-    /看.*(书|题目|屏幕)/i,
-    /帮.*(看|拍)/i,
-    /照一下/i,
-    /拍个.*看看/i,
-  ];
-  
-  return visualPatterns.some(pattern => pattern.test(text));
+export function createQuizStatusResponse(
+  status: {
+    is_active: boolean;
+    capture_count: number;
+    max_captures: number;
+    recognized_text?: string;
+    answer?: string;
+  },
+  messageId: string,
+  agentId: string
+): LingzhuSSEData {
+  return {
+    role: "agent",
+    type: "quiz_status",
+    message_id: messageId,
+    agent_id: agentId,
+    is_finish: false,
+    quiz_status: status,
+  };
+}
+
+export function createContinuousStatusResponse(
+  status: {
+    is_active: boolean;
+    remaining_time_ms: number;
+    session_key: string;
+  },
+  messageId: string,
+  agentId: string
+): LingzhuSSEData {
+  return {
+    role: "agent",
+    type: "continuous_status",
+    message_id: messageId,
+    agent_id: agentId,
+    is_finish: false,
+    continuous_status: status,
+  };
 }

@@ -1,20 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 
-// 改为使用系统临时目录或用户目录，避免权限问题
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// 优先使用 OpenClaw workspace 目录下的缓存，或系统临时目录
-function getCacheBaseDir(): string {
-  // 尝试使用用户主目录下的 .openclaw/lingzhu-cache
-  const homeDir = os.homedir();
-  const openclawCache = path.join(homeDir, ".openclaw", "lingzhu-cache", "img");
-  return openclawCache;
-}
-
-const IMAGE_CACHE_DIR = getCacheBaseDir();
+const IMAGE_CACHE_DIR = path.resolve(__dirname, "../../.cache/img");
 const DEFAULT_MAX_AGE_HOURS = 24;
 const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
