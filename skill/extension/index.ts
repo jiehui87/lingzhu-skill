@@ -5,7 +5,8 @@ import { lingzhuConfigSchema, resolveLingzhuConfig, generateAuthAk } from "./src
 import { createHttpHandler } from "./src/http-handler.js";
 import { registerLingzhuCli } from "./src/cli.js";
 import { createLingzhuTools } from "./src/lingzhu-tools.js";
-import type { LingzhuConfig } from "./src/types.js";
+import { getSessionManager, resetSessionManager } from "./src/events.js";
+import type { LingzhuConfig } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AK_FILE = path.join(__dirname, "../.lingzhu.ak"); // 存储在插件根目录
@@ -33,7 +34,7 @@ function maskSecret(secret: string): string {
 const lingzhuPlugin = {
   id: "lingzhu",
   name: "Lingzhu Bridge",
-  description: "灵珠平台 <-> OpenClaw 协议转换桥梁",
+  description: "灵珠平台 <-> OpenClaw 协议转换桥梁 (支持连续对话、答题模式)",
   configSchema: lingzhuConfigSchema,
 
   register(api: any) {
@@ -42,6 +43,7 @@ const lingzhuPlugin = {
     // 获取并解析配置
     const rawConfig = api.config?.plugins?.entries?.lingzhu?.config;
     pluginConfig = resolveLingzhuConfig(rawConfig);
+
     // 生成或使用已有 AK
     if (pluginConfig.authAk) {
       activeAuthAk = pluginConfig.authAk;
@@ -70,6 +72,9 @@ const lingzhuPlugin = {
 
     // 获取 Gateway 端口
     gatewayPort = api.config?.gateway?.port ?? 18789;
+
+    // 初始化会话管理器
+    const sessionManager = getSessionManager(pluginConfig);
 
     // 配置/状态获取函数
     const getConfig = () => pluginConfig;
@@ -139,22 +144,32 @@ const lingzhuPlugin = {
           }
 
           const url = `http://127.0.0.1:${gatewayPort}/metis/agent/api/sse`;
+          const quizModeStatus = pluginConfig.enableQuizMode !== false ? "✓" : "✗";
+          const continuousModeStatus = pluginConfig.enableContinuousMode !== false ? "✓" : "✗";
 
           console.log("");
           console.log("╔═══════════════════════════════════════════════════════════════════════╗");
-          console.log("║                    Lingzhu Bridge 已启动                              ║");
+          console.log("║        Lingzhu Bridge 已启动 (增强版 - 连续对话 & 答题模式)          ║");
           console.log("╠═══════════════════════════════════════════════════════════════════════╣");
-          console.log(`║  SSE 接口:  ${url.padEnd(56)}║`);
-          console.log(`║  鉴权 AK:   ${maskSecret(activeAuthAk).padEnd(56)}║`);
-          console.log(`║  唤醒词: ${(pluginConfig.wakeWord ?? "灵珠").padEnd(57)}`);
-          console.log(`║ 心跳间隔: ${String(pluginConfig.heartbeatIntervalMs ?? 10000).padEnd(54)}ms ║`);
+          console.log(`║ SSE 接口: ${url.padEnd(56)}║`);
+          console.log(`║ 鉴权 AK: ${maskSecret(activeAuthAk).padEnd(56)}║`);
+          console.log(`║ 连续对话模式: ${(continuousModeStatus + " ").padEnd(52)}║`);
+          console.log(`║ 答题模式: ${(quizModeStatus + " ").padEnd(56)}║`);
+          console.log("╠═══════════════════════════════════════════════════════════════════════╣");
+          console.log("║ 功能说明:                                                              ║");
+          console.log("║ • 连续对话: 发送 mode=continuous 或调用 enable_continuous_mode        ║");
+          console.log("║ • 答题模式: 发送 mode=quiz 或调用 enter_quiz_mode                     ║");
+          console.log("║ • 拍照识别: 调用 capture_and_read 或 enter_quiz_mode                  ║");
           console.log("╚═══════════════════════════════════════════════════════════════════════╝");
           console.log("");
 
           logger.info(`[Lingzhu] Bridge 已启动，端点: ${url}`);
+          logger.info(`[Lingzhu] 连续模式: ${pluginConfig.enableContinuousMode !== false}, 答题模式: ${pluginConfig.enableQuizMode !== false}`);
         },
         stop: () => {
           logger.info("[Lingzhu] Bridge 已停止");
+          // 清理会话管理器
+          resetSessionManager();
         },
       });
     }
